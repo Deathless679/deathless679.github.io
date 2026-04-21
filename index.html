@@ -617,7 +617,8 @@
             { q: "ЗАПАХ УКСУСНОЙ КИСЛОТЫ ПОЯВЛЯЕТСЯ ПРИ НЕПРАВИЛЬНОМ ХРАНЕНИИ КИСЛОТЫ", a: "А) ацетилсалициловой", b: "Б) никотиновой", c: "В) салициловой", d: "Г) аскорбиновой", correct: "А" }
         ];
 
-       function shuffleArray(arr) {
+        // Функция перемешивания массива
+        function shuffleArray(arr) {
             for (let i = arr.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -625,9 +626,10 @@
             return arr;
         }
 
-        function generateQuestionId(questionText, blockPrefix) {
+        // Генерация уникального ID вопроса (стабильный)
+        function generateQuestionId(questionText, correctLetter) {
             let hash = 0;
-            const str = blockPrefix + questionText;
+            const str = questionText + correctLetter;
             for (let i = 0; i < str.length; i++) {
                 const char = str.charCodeAt(i);
                 hash = ((hash << 5) - hash) + char;
@@ -636,41 +638,148 @@
             return 'q_' + Math.abs(hash).toString(36);
         }
 
-        let block1Questions = shuffleArray([...block1Raw]);
-        let block2Questions = shuffleArray([...block2Raw]);
-        let questions = [...block1Questions, ...block2Questions].map((q, idx) => {
-            const originalOptions = [
-                { letter: 'А', text: q.a },
-                { letter: 'Б', text: q.b },
-                { letter: 'В', text: q.c },
-                { letter: 'Г', text: q.d }
-            ];
-            const shuffledOptions = shuffleArray([...originalOptions]);
-            const blockPrefix = (idx < block1Raw.length) ? 'block1_' : 'block2_';
-            const stableId = generateQuestionId(q.q, blockPrefix);
-            return {
-                id: stableId,
-                questionText: q.q,
-                options: shuffledOptions,
-                correctLetter: q.correct,
-            };
-        });
-
-        const STORAGE_KEY = 'pharma_test_progress_v3';
+        // КЛЮЧИ ДЛЯ localStorage
+        const STORAGE_QUESTIONS_KEY = 'pharma_test_questions_stable_v1';
+        const STORAGE_PROGRESS_KEY = 'pharma_test_progress_v4';
+        
+        let questions = [];
         let currentQuestionId = null;
         let userAnswers = {};
         let answerStatus = {};
-        let totalQuestions = questions.length;
-
-        const quizArea = document.getElementById('quizArea');
-        const completionScreen = document.getElementById('completionScreen');
-        const answeredSpan = document.getElementById('answered-count');
-        const correctSpan = document.getElementById('correct-count');
-        const errorSpan = document.getElementById('error-count');
-        const percentSpan = document.getElementById('percent-correct');
-        const totalSpan = document.getElementById('total-questions');
-        totalSpan.textContent = totalQuestions;
-
+        
+        // Инициализация или загрузка вопросов
+        function initQuestions() {
+            const savedQuestions = localStorage.getItem(STORAGE_QUESTIONS_KEY);
+            
+            if (savedQuestions) {
+                // Восстанавливаем сохранённый порядок вопросов
+                questions = JSON.parse(savedQuestions);
+            } else {
+                // Создаём вопросы в первый раз
+                const shuffledBlock1 = shuffleArray([...block1Raw]);
+                const shuffledBlock2 = shuffleArray([...block2Raw]);
+                const allRaw = [...shuffledBlock1, ...shuffledBlock2];
+                
+                questions = allRaw.map((q) => {
+                    const originalOptions = [
+                        { letter: 'А', text: q.a },
+                        { letter: 'Б', text: q.b },
+                        { letter: 'В', text: q.c },
+                        { letter: 'Г', text: q.d }
+                    ];
+                    const shuffledOptions = shuffleArray([...originalOptions]);
+                    const stableId = generateQuestionId(q.q, q.correct);
+                    
+                    return {
+                        id: stableId,
+                        questionText: q.q,
+                        options: shuffledOptions,
+                        correctLetter: q.correct,
+                    };
+                });
+                
+                // Сохраняем порядок вопросов
+                localStorage.setItem(STORAGE_QUESTIONS_KEY, JSON.stringify(questions));
+            }
+        }
+        
+        function loadProgress() {
+            const saved = localStorage.getItem(STORAGE_PROGRESS_KEY);
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    const currentIds = questions.map(q => q.id);
+                    
+                    // Проверяем, что сохранённые ответы относятся к текущим вопросам
+                    if (data.userAnswers && data.answerStatus) {
+                        const savedAnswerIds = Object.keys(data.userAnswers);
+                        const allIdsValid = savedAnswerIds.every(id => currentIds.includes(id));
+                        
+                        if (allIdsValid) {
+                            userAnswers = data.userAnswers;
+                            answerStatus = data.answerStatus;
+                        } else {
+                            // Если структура вопросов изменилась - сбрасываем
+                            resetProgress();
+                        }
+                    }
+                    
+                    // Восстанавливаем текущий вопрос
+                    if (data.currentQuestionId && currentIds.includes(data.currentQuestionId)) {
+                        currentQuestionId = data.currentQuestionId;
+                    } else {
+                        // Ищем первый неотвеченный вопрос или первый в списке
+                        const firstUnanswered = questions.find(q => !userAnswers.hasOwnProperty(q.id));
+                        currentQuestionId = firstUnanswered ? firstUnanswered.id : questions[0]?.id;
+                    }
+                } catch(e) {
+                    resetProgress();
+                }
+            } else {
+                resetProgress();
+            }
+            
+            if (!currentQuestionId && questions.length) {
+                currentQuestionId = questions[0].id;
+            }
+            
+            updateStatsUI();
+        }
+        
+        function resetProgress() {
+            userAnswers = {};
+            answerStatus = {};
+            currentQuestionId = questions[0]?.id;
+            saveProgress();
+        }
+        
+        function saveProgress() {
+            const data = {
+                currentQuestionId: currentQuestionId,
+                userAnswers: userAnswers,
+                answerStatus: answerStatus
+            };
+            localStorage.setItem(STORAGE_PROGRESS_KEY, JSON.stringify(data));
+            updateStatsUI();
+        }
+        
+        // Полный сброс с перемешиванием вопросов
+        function fullReset() {
+            // Перемешиваем вопросы заново
+            const shuffledBlock1 = shuffleArray([...block1Raw]);
+            const shuffledBlock2 = shuffleArray([...block2Raw]);
+            const allRaw = [...shuffledBlock1, ...shuffledBlock2];
+            
+            questions = allRaw.map((q) => {
+                const originalOptions = [
+                    { letter: 'А', text: q.a },
+                    { letter: 'Б', text: q.b },
+                    { letter: 'В', text: q.c },
+                    { letter: 'Г', text: q.d }
+                ];
+                const shuffledOptions = shuffleArray([...originalOptions]);
+                const stableId = generateQuestionId(q.q, q.correct);
+                
+                return {
+                    id: stableId,
+                    questionText: q.q,
+                    options: shuffledOptions,
+                    correctLetter: q.correct,
+                };
+            });
+            
+            // Сохраняем новый порядок вопросов
+            localStorage.setItem(STORAGE_QUESTIONS_KEY, JSON.stringify(questions));
+            
+            // Сбрасываем прогресс
+            resetProgress();
+            
+            // Обновляем общее количество
+            document.getElementById('total-questions').textContent = questions.length;
+            
+            renderCurrentQuestion();
+        }
+        
         function computeStats() {
             const totalAnswered = Object.keys(userAnswers).length;
             let correct = 0;
@@ -681,104 +790,29 @@
             const percent = totalAnswered === 0 ? 0 : Math.round((correct / totalAnswered) * 100);
             return { totalAnswered, correct, errors, percent };
         }
-
+        
         function updateStatsUI() {
             const stats = computeStats();
-            answeredSpan.textContent = stats.totalAnswered;
-            correctSpan.textContent = stats.correct;
-            errorSpan.textContent = stats.errors;
-            percentSpan.textContent = stats.percent + '%';
+            document.getElementById('answered-count').textContent = stats.totalAnswered;
+            document.getElementById('correct-count').textContent = stats.correct;
+            document.getElementById('error-count').textContent = stats.errors;
+            document.getElementById('percent-correct').textContent = stats.percent + '%';
+            document.getElementById('total-questions').textContent = questions.length;
         }
-
+        
         function getIndexById(id) {
             return questions.findIndex(q => q.id === id);
         }
-
-        function saveProgress() {
-            const data = {
-                currentQuestionId: currentQuestionId,
-                userAnswers: userAnswers,
-                answerStatus: answerStatus
-            };
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-            updateStatsUI();
-        }
-
-        function resetProgress() {
-            userAnswers = {};
-            answerStatus = {};
-            currentQuestionId = questions[0]?.id;
-            saveProgress();
-        }
-
-        function loadProgress() {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                try {
-                    const data = JSON.parse(saved);
-                    const savedIds = Object.keys(data.userAnswers || {});
-                    const currentIds = questions.map(q => q.id);
-                    const allIdsExist = savedIds.every(id => currentIds.includes(id));
-
-                    if (allIdsExist) {
-                        userAnswers = data.userAnswers || {};
-                        answerStatus = data.answerStatus || {};
-                        const savedId = data.currentQuestionId;
-                        // ВАЖНО: проверяем, что сохранённый ID вопроса существует в текущем списке
-                        if (savedId && currentIds.includes(savedId)) {
-                            currentQuestionId = savedId;
-                        } else {
-                            // Если ID не найден (например, после сброса), берём первый неотвеченный или первый вообще
-                            currentQuestionId = questions.find(q => !userAnswers.hasOwnProperty(q.id))?.id || questions[0].id;
-                        }
-                    } else {
-                        resetProgress();
-                    }
-                } catch(e) {
-                    resetProgress();
-                }
-            } else {
-                resetProgress();
-            }
-            if (!currentQuestionId && questions.length) {
-                currentQuestionId = questions[0].id;
-            }
-            updateStatsUI();
-        }
-
-        function fullReset() {
-            // Перемешиваем вопросы заново
-            block1Questions = shuffleArray([...block1Raw]);
-            block2Questions = shuffleArray([...block2Raw]);
-            questions = [...block1Questions, ...block2Questions].map((q, idx) => {
-                const originalOptions = [
-                    { letter: 'А', text: q.a },
-                    { letter: 'Б', text: q.b },
-                    { letter: 'В', text: q.c },
-                    { letter: 'Г', text: q.d }
-                ];
-                const blockPrefix = (idx < block1Raw.length) ? 'block1_' : 'block2_';
-                const stableId = generateQuestionId(q.q, blockPrefix);
-                return {
-                    id: stableId,
-                    questionText: q.q,
-                    options: shuffleArray(originalOptions),
-                    correctLetter: q.correct,
-                };
-            });
-            totalQuestions = questions.length;
-            totalSpan.textContent = totalQuestions;
-            resetProgress();  // здесь currentQuestionId станет первый вопрос
-            renderCurrentQuestion();
-        }
-
+        
         function renderCurrentQuestion() {
             const currentIndex = getIndexById(currentQuestionId);
-            if (currentIndex === -1 || currentIndex >= totalQuestions) {
+            
+            // Проверка на завершение теста
+            if (currentIndex === -1 || currentIndex >= questions.length) {
                 quizArea.innerHTML = '';
                 const stats = computeStats();
                 document.getElementById('finalStats').innerHTML = `
-                    <p>✅ Отвечено: ${stats.totalAnswered} из ${totalQuestions}</p>
+                    <p>✅ Отвечено: ${stats.totalAnswered} из ${questions.length}</p>
                     <p>✔️ Верных ответов: ${stats.correct}</p>
                     <p>❌ Ошибок: ${stats.errors}</p>
                     <p>📊 Процент верных: ${stats.percent}%</p>
@@ -792,16 +826,17 @@
             const selectedLetter = userAnswers[q.id] || null;
             const isAnswered = answerStatus.hasOwnProperty(q.id);
             const isCorrect = answerStatus[q.id];
-            const blockName = currentIndex < block1Raw.length ? 'МДК.02.01 «Технология изготовления лекарственных форм»' : 'МДК.02.02 «Контроль качества лекарственных средств»';
+            
+            const blockName = currentIndex < 150 ? 'МДК.02.01 «Технология изготовления лекарственных форм»' : 'МДК.02.02 «Контроль качества лекарственных средств»';
             
             let html = `
                 <div class="block-badge">📌 ${blockName}</div>
                 <div class="question-card">
                     <div class="question-header">
-                        <span>Вопрос ${currentIndex+1} из ${totalQuestions}</span>
+                        <span>Вопрос ${currentIndex+1} из ${questions.length}</span>
                         ${isAnswered ? '<span>✅ Отвечено</span>' : '<span>⏳ Ожидает ответа</span>'}
                     </div>
-                    <div class="question-text">${q.questionText}</div>
+                    <div class="question-text">${escapeHtml(q.questionText)}</div>
                     <div class="options">
             `;
             
@@ -819,7 +854,7 @@
                 html += `
                     <div class="${optionClass}" data-letter="${opt.letter}">
                         <span class="option-letter">${opt.letter}</span>
-                        <span>${opt.text}</span>
+                        <span>${escapeHtml(opt.text)}</span>
                     </div>
                 `;
             });
@@ -837,7 +872,7 @@
                     html += `<div class="feedback" style="border-left-color: #2e8b57;">✔ Правильно! Вы выбрали верный ответ.</div>`;
                 } else {
                     const selectedText = q.options.find(o => o.letter === selectedLetter)?.text || '';
-                    html += `<div class="feedback" style="border-left-color: #c23b3b;">❌ Неверно. Правильный ответ: ${q.correctLetter}) ${correctOptionText}</div>`;
+                    html += `<div class="feedback" style="border-left-color: #c23b3b;">❌ Неверно. Правильный ответ: ${q.correctLetter}) ${escapeHtml(correctOptionText)}</div>`;
                 }
             }
             
@@ -848,9 +883,8 @@
             
             quizArea.innerHTML = html;
             
-            // Обработка выбора варианта
+            const optionDivs = document.querySelectorAll('.option');
             if (!isAnswered) {
-                const optionDivs = document.querySelectorAll('.option');
                 optionDivs.forEach(div => {
                     div.addEventListener('click', (e) => {
                         const letter = div.dataset.letter;
@@ -863,7 +897,6 @@
                 });
             }
             
-            // Кнопка "Ответить"
             const submitBtn = document.getElementById('submitAnswerBtn');
             if (submitBtn) {
                 submitBtn.addEventListener('click', () => {
@@ -878,12 +911,13 @@
             }
             
             function goNext() {
-                const nextIndex = currentIndex + 1;
-                if (nextIndex < totalQuestions) {
+                const nextIndex = getIndexById(currentQuestionId) + 1;
+                if (nextIndex < questions.length) {
                     currentQuestionId = questions[nextIndex].id;
                     saveProgress();
                     renderCurrentQuestion();
                 } else {
+                    // Тест завершён
                     currentQuestionId = null;
                     saveProgress();
                     renderCurrentQuestion();
@@ -896,7 +930,7 @@
             const prevBtn = document.getElementById('prevQuestionBtn');
             if (prevBtn) {
                 prevBtn.addEventListener('click', () => {
-                    const prevIndex = currentIndex - 1;
+                    const prevIndex = getIndexById(currentQuestionId) - 1;
                     if (prevIndex >= 0) {
                         currentQuestionId = questions[prevIndex].id;
                         saveProgress();
@@ -905,18 +939,35 @@
                 });
             }
         }
-
+        
+        // Простая защита от XSS
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function(c) {
+                return c;
+            });
+        }
+        
+        // Инициализация и запуск
+        initQuestions();
+        loadProgress();
+        renderCurrentQuestion();
+        
+        // Кнопки сброса
         document.getElementById('resetTestBtn').addEventListener('click', () => {
             if (confirm('Начать тест заново? Весь прогресс будет сброшен, вопросы перемешаются.')) {
                 fullReset();
             }
         });
+        
         document.getElementById('resetFromCompleteBtn').addEventListener('click', () => {
             fullReset();
         });
-
-        loadProgress();
-        renderCurrentQuestion();
     })();
 </script>
 </body>
