@@ -64,19 +64,27 @@
             display: flex;
             gap: 24px;
             font-weight: 500;
+            flex-wrap: wrap;
         }
         .stat-item {
             display: flex;
             align-items: baseline;
             gap: 6px;
-        }
-        .stat-value {
             background: #eef3fa;
             padding: 4px 12px;
             border-radius: 40px;
-            font-size: 1.4rem;
+        }
+        .stat-value {
             font-weight: 700;
             color: #1e3a6b;
+            font-size: 1.3rem;
+            min-width: 48px;
+            display: inline-block;
+            text-align: center;
+        }
+        .stat-label {
+            font-size: 0.9rem;
+            color: #2c4c7c;
         }
         .reset-btn {
             background: #fff0f0;
@@ -235,6 +243,14 @@
             color: #2a5c8a;
             margin-bottom: 20px;
         }
+        .completion-stats {
+            background: #eef2f8;
+            border-radius: 28px;
+            padding: 20px;
+            margin: 20px auto;
+            max-width: 350px;
+            text-align: left;
+        }
         .hidden {
             display: none !important;
         }
@@ -243,11 +259,6 @@
             color: #6f85a2;
             text-align: center;
             font-size: 0.85rem;
-        }
-        .small-note {
-            font-size: 0.9rem;
-            color: #4a668a;
-            margin-left: 8px;
         }
         @media (max-width: 600px) {
             h1 { font-size: 1.5rem; }
@@ -270,6 +281,9 @@
     <div class="progress-panel">
         <div class="stats">
             <div class="stat-item">✅ Отвечено: <span class="stat-value" id="answered-count">0</span></div>
+            <div class="stat-item">✔️ Верно: <span class="stat-value" id="correct-count">0</span></div>
+            <div class="stat-item">❌ Ошибки: <span class="stat-value" id="error-count">0</span></div>
+            <div class="stat-item">📊 Процент: <span class="stat-value" id="percent-correct">0%</span></div>
             <div class="stat-item">📌 Всего: <span class="stat-value" id="total-questions">300</span></div>
         </div>
         <button class="reset-btn" id="resetTestBtn">🔄 Начать тест заново</button>
@@ -281,7 +295,7 @@
 
     <div id="completionScreen" class="completion-message hidden">
         <h2>🎉 Тест пройден!</h2>
-        <p>Вы ответили на все вопросы. Спасибо за работу.</p>
+        <div class="completion-stats" id="finalStats"></div>
         <button class="btn btn-primary" id="resetFromCompleteBtn" style="margin-top: 24px;">Пройти заново</button>
     </div>
 
@@ -602,7 +616,7 @@
             { q: "ЗАПАХ УКСУСНОЙ КИСЛОТЫ ПОЯВЛЯЕТСЯ ПРИ НЕПРАВИЛЬНОМ ХРАНЕНИИ КИСЛОТЫ", a: "А) ацетилсалициловой", b: "Б) никотиновой", c: "В) салициловой", d: "Г) аскорбиновой", correct: "А" }
         ];
 
-        // ---------- ФУНКЦИИ ДЛЯ ПЕРЕМЕШИВАНИЯ ----------
+         // Функция перемешивания массива
         function shuffleArray(arr) {
             for (let i = arr.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
@@ -611,24 +625,23 @@
             return arr;
         }
 
-        // Генерация уникального ID вопроса на основе его текста и блока
+        // Генерация уникального ID вопроса
         function generateQuestionId(questionText, blockPrefix) {
-            // Простой хеш из текста + префикс блока
             let hash = 0;
             const str = blockPrefix + questionText;
             for (let i = 0; i < str.length; i++) {
                 const char = str.charCodeAt(i);
                 hash = ((hash << 5) - hash) + char;
-                hash = hash & hash; // Convert to 32bit integer
+                hash = hash & hash;
             }
             return 'q_' + Math.abs(hash).toString(36);
         }
 
-        // Создаем рабочие копии и сразу перемешиваем внутри блоков (вопросы рандомно)
+        // Перемешиваем вопросы внутри блоков
         let block1Questions = shuffleArray([...block1Raw]);
         let block2Questions = shuffleArray([...block2Raw]);
 
-        // Общий пул вопросов: сначала блок 1, потом блок 2 (блоки не смешиваются)
+        // Общий пул вопросов: сначала блок 1, потом блок 2
         let questions = [...block1Questions, ...block2Questions];
         
         // Добавляем id и перемешиваем варианты ответов для каждого вопроса
@@ -639,48 +652,63 @@
                 { letter: 'В', text: q.c },
                 { letter: 'Г', text: q.d }
             ];
-            // Перемешиваем варианты ответов
             const shuffledOptions = shuffleArray([...originalOptions]);
-            
-            // Определяем блок для генерации стабильного ID
             const blockPrefix = (index < 150) ? 'block1_' : 'block2_';
             const stableId = generateQuestionId(q.q, blockPrefix);
             
             return {
-                id: stableId,           // Уникальный ID, не зависящий от порядка
+                id: stableId,
                 questionText: q.q,
                 options: shuffledOptions,
                 correctLetter: q.correct,
-                originalQuestionText: q.q // для отладки
             };
         });
 
-        const STORAGE_KEY = 'pharma_test_progress_v2'; // новая версия ключа
+        const STORAGE_KEY = 'pharma_test_progress_v3';
         
-        // Состояние приложения
-        let currentQuestionId = null;     // ID текущего вопроса
-        let userAnswers = {};             // { questionId: selectedLetter }
-        let answerStatus = {};            // { questionId: true/false }
+        let currentQuestionId = null;
+        let userAnswers = {};
+        let answerStatus = {};
         
         let totalQuestions = questions.length;
         const quizArea = document.getElementById('quizArea');
         const completionScreen = document.getElementById('completionScreen');
         const answeredSpan = document.getElementById('answered-count');
+        const correctSpan = document.getElementById('correct-count');
+        const errorSpan = document.getElementById('error-count');
+        const percentSpan = document.getElementById('percent-correct');
         const totalSpan = document.getElementById('total-questions');
         totalSpan.textContent = totalQuestions;
 
-        // Получить индекс вопроса по его ID
+        // Подсчёт статистики
+        function computeStats() {
+            const totalAnswered = Object.keys(userAnswers).length;
+            let correct = 0;
+            for (let id in answerStatus) {
+                if (answerStatus[id] === true) correct++;
+            }
+            const errors = totalAnswered - correct;
+            const percent = totalAnswered === 0 ? 0 : Math.round((correct / totalAnswered) * 100);
+            return { totalAnswered, correct, errors, percent };
+        }
+
+        function updateStatsUI() {
+            const stats = computeStats();
+            answeredSpan.textContent = stats.totalAnswered;
+            correctSpan.textContent = stats.correct;
+            errorSpan.textContent = stats.errors;
+            percentSpan.textContent = stats.percent + '%';
+        }
+
         function getIndexById(id) {
             return questions.findIndex(q => q.id === id);
         }
 
-        // ---------- ЗАГРУЗКА / СОХРАНЕНИЕ ----------
         function loadProgress() {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 try {
                     const data = JSON.parse(saved);
-                    // Проверяем, что сохраненные ID соответствуют текущим вопросам
                     const savedIds = Object.keys(data.userAnswers || {});
                     const currentIds = questions.map(q => q.id);
                     const allIdsExist = savedIds.every(id => currentIds.includes(id));
@@ -688,12 +716,10 @@
                     if (allIdsExist) {
                         userAnswers = data.userAnswers || {};
                         answerStatus = data.answerStatus || {};
-                        // Восстанавливаем текущий вопрос по ID
                         const savedId = data.currentQuestionId;
                         if (savedId && currentIds.includes(savedId)) {
                             currentQuestionId = savedId;
                         } else {
-                            // Если сохраненный ID не найден, берем первый неотвеченный
                             currentQuestionId = questions.find(q => !userAnswers.hasOwnProperty(q.id))?.id || questions[0].id;
                         }
                     } else {
@@ -705,11 +731,10 @@
             } else {
                 resetProgress();
             }
-            // Если currentQuestionId не установлен
             if (!currentQuestionId) {
-                currentQuestionId = questions[0].id;
+                currentQuestionId = questions[0]?.id;
             }
-            updateAnsweredCount();
+            updateStatsUI();
         }
 
         function saveProgress() {
@@ -719,17 +744,17 @@
                 answerStatus: answerStatus
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            updateStatsUI();
         }
 
         function resetProgress() {
             userAnswers = {};
             answerStatus = {};
-            currentQuestionId = questions[0].id;
+            currentQuestionId = questions[0]?.id;
             saveProgress();
         }
 
         function fullReset() {
-            // Перемешиваем заново вопросы в блоках и варианты ответов
             block1Questions = shuffleArray([...block1Raw]);
             block2Questions = shuffleArray([...block2Raw]);
             questions = [...block1Questions, ...block2Questions].map((q, idx) => {
@@ -754,17 +779,18 @@
             renderCurrentQuestion();
         }
 
-        function updateAnsweredCount() {
-            const answered = Object.keys(userAnswers).length;
-            answeredSpan.textContent = answered;
-        }
-
-        // ---------- РЕНДЕРИНГ ----------
         function renderCurrentQuestion() {
             const currentIndex = getIndexById(currentQuestionId);
             
             if (currentIndex === -1 || currentIndex >= totalQuestions) {
                 quizArea.innerHTML = '';
+                const stats = computeStats();
+                document.getElementById('finalStats').innerHTML = `
+                    <p>✅ Отвечено: ${stats.totalAnswered} из ${totalQuestions}</p>
+                    <p>✔️ Верных ответов: ${stats.correct}</p>
+                    <p>❌ Ошибок: ${stats.errors}</p>
+                    <p>📊 Процент верных: ${stats.percent}%</p>
+                `;
                 completionScreen.classList.remove('hidden');
                 return;
             }
@@ -775,7 +801,6 @@
             const isAnswered = answerStatus.hasOwnProperty(q.id);
             const isCorrect = answerStatus[q.id];
             
-            // Определяем, какой блок (первые 150 вопросов - блок1)
             const blockName = currentIndex < 150 ? 'МДК.02.01 «Технология изготовления лекарственных форм»' : 'МДК.02.02 «Контроль качества лекарственных средств»';
             
             let html = `
@@ -808,17 +833,13 @@
                 `;
             });
             
-            html += `</div>`;
-            
-            // Кнопки действий
-            html += `<div class="actions">`;
+            html += `</div><div class="actions">`;
             if (!isAnswered) {
                 html += `<button class="btn btn-primary" id="submitAnswerBtn" ${!selectedLetter ? 'disabled' : ''}>Ответить</button>`;
             }
             html += `<button class="btn btn-outline" id="nextQuestionBtn">${isAnswered ? 'Далее ▶' : 'Пропустить'}</button>`;
             html += `</div>`;
             
-            // Обратная связь после ответа
             if (isAnswered) {
                 const correctOptionText = q.options.find(o => o.letter === q.correctLetter).text;
                 if (isCorrect) {
@@ -829,17 +850,13 @@
                 }
             }
             
-            html += `</div>`;
-            
-            // Навигация
-            html += `<div class="nav-buttons">`;
+            html += `</div><div class="nav-buttons">`;
             html += `<button class="btn btn-outline" id="prevQuestionBtn" ${currentIndex === 0 ? 'disabled' : ''}>◀ Назад</button>`;
             html += `<button class="btn btn-outline" id="nextQuestionBtn2">${isAnswered ? 'Далее ▶' : 'Пропустить'}</button>`;
             html += `</div>`;
             
             quizArea.innerHTML = html;
             
-            // Обработчики событий
             const optionDivs = document.querySelectorAll('.option');
             if (!isAnswered) {
                 optionDivs.forEach(div => {
@@ -860,10 +877,9 @@
                     const selected = q._tempSelected;
                     if (!selected) return;
                     userAnswers[q.id] = selected;
-                    const isCorrect = (selected === q.correctLetter);
-                    answerStatus[q.id] = isCorrect;
+                    const isCorrectAns = (selected === q.correctLetter);
+                    answerStatus[q.id] = isCorrectAns;
                     saveProgress();
-                    updateAnsweredCount();
                     renderCurrentQuestion();
                 });
             }
@@ -897,24 +913,20 @@
             }
         }
 
-        // Сброс
         document.getElementById('resetTestBtn').addEventListener('click', () => {
             if (confirm('Начать тест заново? Весь прогресс будет сброшен, вопросы перемешаются.')) {
                 fullReset();
-                renderCurrentQuestion();
-                updateAnsweredCount();
+                updateStatsUI();
             }
         });
         document.getElementById('resetFromCompleteBtn').addEventListener('click', () => {
             fullReset();
-            renderCurrentQuestion();
-            updateAnsweredCount();
+            updateStatsUI();
         });
 
-        // Инициализация
         loadProgress();
         renderCurrentQuestion();
-        updateAnsweredCount();
+        updateStatsUI();
     })();
 </script>
 </body>
