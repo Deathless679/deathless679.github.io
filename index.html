@@ -617,7 +617,13 @@
             { q: "ЗАПАХ УКСУСНОЙ КИСЛОТЫ ПОЯВЛЯЕТСЯ ПРИ НЕПРАВИЛЬНОМ ХРАНЕНИИ КИСЛОТЫ", a: "А) ацетилсалициловой", b: "Б) никотиновой", c: "В) салициловой", d: "Г) аскорбиновой", correct: "А" }
         ];
 
- function shuffleArray(arr) {
+   // Функция для удаления буквы из начала строки (А), Б), В), Г))
+        function removeLetterPrefix(str) {
+            if (!str) return str;
+            return str.replace(/^[АБВГ]\)\s*/, '');
+        }
+
+        function shuffleArray(arr) {
             for (let i = arr.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -625,22 +631,29 @@
             return arr;
         }
 
-        function generateQuestionId(questionText, correctLetter) {
+        function generateQuestionId(questionText) {
             let hash = 0;
-            const str = questionText + correctLetter;
-            for (let i = 0; i < str.length; i++) {
-                const char = str.charCodeAt(i);
+            for (let i = 0; i < questionText.length; i++) {
+                const char = questionText.charCodeAt(i);
                 hash = ((hash << 5) - hash) + char;
                 hash = hash & hash;
             }
             return 'q_' + Math.abs(hash).toString(36);
         }
 
-        const STORAGE_QUESTIONS_KEY = 'pharma_test_questions_stable_v2';
-        const STORAGE_PROGRESS_KEY = 'pharma_test_progress_v5';
+        // Получить ТЕКСТ правильного ответа (из поля correct, которое всегда "А")
+        function getCorrectAnswerText(question) {
+            // В исходных данных correct всегда "А", берем текст из поля a
+            const rawText = question.a;
+            // Возвращаем текст без префикса "А) "
+            return removeLetterPrefix(rawText);
+        }
+
+        const STORAGE_QUESTIONS_KEY = 'pharma_test_questions_stable_v7';
+        const STORAGE_PROGRESS_KEY = 'pharma_test_progress_v10';
         
         let questions = [];
-        let currentIndex = 0;  // Используем индекс вместо ID
+        let currentIndex = 0;
         let userAnswers = {};
         let answerStatus = {};
         
@@ -655,20 +668,32 @@
                 const allRaw = [...shuffledBlock1, ...shuffledBlock2];
                 
                 questions = allRaw.map((q) => {
-                    const originalOptions = [
-                        { letter: 'А', text: q.a },
-                        { letter: 'Б', text: q.b },
-                        { letter: 'В', text: q.c },
-                        { letter: 'Г', text: q.d }
+                    // Получаем ТЕКСТ правильного ответа (из поля a, так как correct = "А")
+                    const correctText = getCorrectAnswerText(q);
+                    
+                    // Создаём массив вариантов ответов (удаляя буквы из текста)
+                    const optionTexts = [
+                        { letter: 'А', text: removeLetterPrefix(q.a) },
+                        { letter: 'Б', text: removeLetterPrefix(q.b) },
+                        { letter: 'В', text: removeLetterPrefix(q.c) },
+                        { letter: 'Г', text: removeLetterPrefix(q.d) }
                     ];
-                    const shuffledOptions = shuffleArray([...originalOptions]);
-                    const stableId = generateQuestionId(q.q, q.correct);
+                    
+                    // Перемешиваем варианты
+                    const shuffledOptions = shuffleArray([...optionTexts]);
+                    
+                    // Находим, под какой буквой теперь находится правильный ответ
+                    const correctOption = shuffledOptions.find(opt => opt.text === correctText);
+                    const newCorrectLetter = correctOption ? correctOption.letter : 'А';
+                    
+                    const stableId = generateQuestionId(q.q);
                     
                     return {
                         id: stableId,
                         questionText: q.q,
                         options: shuffledOptions,
-                        correctLetter: q.correct,
+                        correctLetter: newCorrectLetter,
+                        correctText: correctText
                     };
                 });
                 
@@ -693,11 +718,9 @@
                         }
                     }
                     
-                    // Восстанавливаем индекс, проверяем валидность
                     if (typeof data.currentIndex === 'number' && data.currentIndex >= 0 && data.currentIndex < questions.length) {
                         currentIndex = data.currentIndex;
                     } else {
-                        // Ищем первый неотвеченный вопрос
                         const firstUnanswered = questions.findIndex((q, idx) => !userAnswers.hasOwnProperty(q.id));
                         currentIndex = firstUnanswered !== -1 ? firstUnanswered : 0;
                     }
@@ -734,20 +757,24 @@
             const allRaw = [...shuffledBlock1, ...shuffledBlock2];
             
             questions = allRaw.map((q) => {
-                const originalOptions = [
-                    { letter: 'А', text: q.a },
-                    { letter: 'Б', text: q.b },
-                    { letter: 'В', text: q.c },
-                    { letter: 'Г', text: q.d }
+                const correctText = getCorrectAnswerText(q);
+                const optionTexts = [
+                    { letter: 'А', text: removeLetterPrefix(q.a) },
+                    { letter: 'Б', text: removeLetterPrefix(q.b) },
+                    { letter: 'В', text: removeLetterPrefix(q.c) },
+                    { letter: 'Г', text: removeLetterPrefix(q.d) }
                 ];
-                const shuffledOptions = shuffleArray([...originalOptions]);
-                const stableId = generateQuestionId(q.q, q.correct);
+                const shuffledOptions = shuffleArray([...optionTexts]);
+                const correctOption = shuffledOptions.find(opt => opt.text === correctText);
+                const newCorrectLetter = correctOption ? correctOption.letter : 'А';
+                const stableId = generateQuestionId(q.q);
                 
                 return {
                     id: stableId,
                     questionText: q.q,
                     options: shuffledOptions,
-                    correctLetter: q.correct,
+                    correctLetter: newCorrectLetter,
+                    correctText: correctText
                 };
             });
             
@@ -778,7 +805,6 @@
         }
         
         function renderCurrentQuestion() {
-            // Проверка на завершение
             if (currentIndex >= questions.length) {
                 quizArea.innerHTML = '';
                 const stats = computeStats();
@@ -886,7 +912,6 @@
                     saveProgress();
                     renderCurrentQuestion();
                 } else {
-                    // Тест завершён
                     currentIndex = questions.length;
                     saveProgress();
                     renderCurrentQuestion();
@@ -918,7 +943,6 @@
             });
         }
         
-        // Инициализация
         initQuestions();
         loadProgress();
         renderCurrentQuestion();
