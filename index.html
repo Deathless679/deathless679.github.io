@@ -617,7 +617,6 @@
             { q: "ЗАПАХ УКСУСНОЙ КИСЛОТЫ ПОЯВЛЯЕТСЯ ПРИ НЕПРАВИЛЬНОМ ХРАНЕНИИ КИСЛОТЫ", a: "А) ацетилсалициловой", b: "Б) никотиновой", c: "В) салициловой", d: "Г) аскорбиновой", correct: "А" }
         ];
 
-   // Функция для удаления буквы из начала строки (А), Б), В), Г))
         function removeLetterPrefix(str) {
             if (!str) return str;
             return str.replace(/^[АБВГ]\)\s*/, '');
@@ -634,104 +633,65 @@
         function generateQuestionId(questionText) {
             let hash = 0;
             for (let i = 0; i < questionText.length; i++) {
-                const char = questionText.charCodeAt(i);
-                hash = ((hash << 5) - hash) + char;
+                hash = ((hash << 5) - hash) + questionText.charCodeAt(i);
                 hash = hash & hash;
             }
             return 'q_' + Math.abs(hash).toString(36);
         }
 
-        // Получить ТЕКСТ правильного ответа (из поля correct, которое всегда "А")
-        function getCorrectAnswerText(question) {
-            // В исходных данных correct всегда "А", берем текст из поля a
-            const rawText = question.a;
-            // Возвращаем текст без префикса "А) "
-            return removeLetterPrefix(rawText);
+        // ГЛАВНОЕ: создаем вопрос где правильный ответ НЕ обязательно под А
+        function buildShuffledQuestion(rawQ) {
+            // Получаем ТЕКСТ правильного ответа (из поля a, потому что correct: "А")
+            const correctAnswerText = removeLetterPrefix(rawQ.a);
+            
+            // Создаем ВСЕ варианты ответов (уже без буквенных префиксов)
+            const allOptions = [
+                { text: removeLetterPrefix(rawQ.a) },
+                { text: removeLetterPrefix(rawQ.b) },
+                { text: removeLetterPrefix(rawQ.c) },
+                { text: removeLetterPrefix(rawQ.d) }
+            ];
+            
+            // Перемешиваем варианты
+            const shuffledOptions = shuffleArray([...allOptions]);
+            
+            // Назначаем буквы А, Б, В, Г в случайном порядке
+            const letters = ['А', 'Б', 'В', 'Г'];
+            const finalOptions = shuffledOptions.map((opt, idx) => ({
+                letter: letters[idx],
+                text: opt.text
+            }));
+            
+            // Находим, под какой буквой теперь находится правильный ответ
+            const correctOption = finalOptions.find(opt => opt.text === correctAnswerText);
+            const newCorrectLetter = correctOption ? correctOption.letter : 'А';
+            
+            return {
+                id: generateQuestionId(rawQ.q),
+                questionText: rawQ.q,
+                options: finalOptions,
+                correctLetter: newCorrectLetter,
+                correctText: correctAnswerText
+            };
         }
 
-        const STORAGE_QUESTIONS_KEY = 'pharma_test_questions_stable_v7';
-        const STORAGE_PROGRESS_KEY = 'pharma_test_progress_v10';
-        
         let questions = [];
         let currentIndex = 0;
         let userAnswers = {};
         let answerStatus = {};
         
+        const STORAGE_QUESTIONS_KEY = 'pharma_fixed_no_extra_questions';
+        const STORAGE_PROGRESS_KEY = 'pharma_progress_fixed_v2';
+        
         function initQuestions() {
-            const savedQuestions = localStorage.getItem(STORAGE_QUESTIONS_KEY);
-            
-            if (savedQuestions) {
-                questions = JSON.parse(savedQuestions);
+            const saved = localStorage.getItem(STORAGE_QUESTIONS_KEY);
+            if (saved) {
+                questions = JSON.parse(saved);
             } else {
-                const shuffledBlock1 = shuffleArray([...block1Raw]);
-                const shuffledBlock2 = shuffleArray([...block2Raw]);
-                const allRaw = [...shuffledBlock1, ...shuffledBlock2];
-                
-                questions = allRaw.map((q) => {
-                    // Получаем ТЕКСТ правильного ответа (из поля a, так как correct = "А")
-                    const correctText = getCorrectAnswerText(q);
-                    
-                    // Создаём массив вариантов ответов (удаляя буквы из текста)
-                    const optionTexts = [
-                        { letter: 'А', text: removeLetterPrefix(q.a) },
-                        { letter: 'Б', text: removeLetterPrefix(q.b) },
-                        { letter: 'В', text: removeLetterPrefix(q.c) },
-                        { letter: 'Г', text: removeLetterPrefix(q.d) }
-                    ];
-                    
-                    // Перемешиваем варианты
-                    const shuffledOptions = shuffleArray([...optionTexts]);
-                    
-                    // Находим, под какой буквой теперь находится правильный ответ
-                    const correctOption = shuffledOptions.find(opt => opt.text === correctText);
-                    const newCorrectLetter = correctOption ? correctOption.letter : 'А';
-                    
-                    const stableId = generateQuestionId(q.q);
-                    
-                    return {
-                        id: stableId,
-                        questionText: q.q,
-                        options: shuffledOptions,
-                        correctLetter: newCorrectLetter,
-                        correctText: correctText
-                    };
-                });
-                
+                const allRaw = [...block1Raw, ...block2Raw];
+                questions = allRaw.map(raw => buildShuffledQuestion(raw));
                 localStorage.setItem(STORAGE_QUESTIONS_KEY, JSON.stringify(questions));
             }
-        }
-        
-        function loadProgress() {
-            const saved = localStorage.getItem(STORAGE_PROGRESS_KEY);
-            if (saved) {
-                try {
-                    const data = JSON.parse(saved);
-                    const currentIds = questions.map(q => q.id);
-                    
-                    if (data.userAnswers && data.answerStatus) {
-                        const savedAnswerIds = Object.keys(data.userAnswers);
-                        const allIdsValid = savedAnswerIds.every(id => currentIds.includes(id));
-                        
-                        if (allIdsValid) {
-                            userAnswers = data.userAnswers;
-                            answerStatus = data.answerStatus;
-                        }
-                    }
-                    
-                    if (typeof data.currentIndex === 'number' && data.currentIndex >= 0 && data.currentIndex < questions.length) {
-                        currentIndex = data.currentIndex;
-                    } else {
-                        const firstUnanswered = questions.findIndex((q, idx) => !userAnswers.hasOwnProperty(q.id));
-                        currentIndex = firstUnanswered !== -1 ? firstUnanswered : 0;
-                    }
-                } catch(e) {
-                    resetProgress();
-                }
-            } else {
-                resetProgress();
-            }
-            
-            updateStatsUI();
         }
         
         function resetProgress() {
@@ -741,78 +701,82 @@
             saveProgress();
         }
         
-        function saveProgress() {
-            const data = {
-                currentIndex: currentIndex,
-                userAnswers: userAnswers,
-                answerStatus: answerStatus
-            };
-            localStorage.setItem(STORAGE_PROGRESS_KEY, JSON.stringify(data));
-            updateStatsUI();
-        }
-        
         function fullReset() {
-            const shuffledBlock1 = shuffleArray([...block1Raw]);
-            const shuffledBlock2 = shuffleArray([...block2Raw]);
-            const allRaw = [...shuffledBlock1, ...shuffledBlock2];
-            
-            questions = allRaw.map((q) => {
-                const correctText = getCorrectAnswerText(q);
-                const optionTexts = [
-                    { letter: 'А', text: removeLetterPrefix(q.a) },
-                    { letter: 'Б', text: removeLetterPrefix(q.b) },
-                    { letter: 'В', text: removeLetterPrefix(q.c) },
-                    { letter: 'Г', text: removeLetterPrefix(q.d) }
-                ];
-                const shuffledOptions = shuffleArray([...optionTexts]);
-                const correctOption = shuffledOptions.find(opt => opt.text === correctText);
-                const newCorrectLetter = correctOption ? correctOption.letter : 'А';
-                const stableId = generateQuestionId(q.q);
-                
-                return {
-                    id: stableId,
-                    questionText: q.q,
-                    options: shuffledOptions,
-                    correctLetter: newCorrectLetter,
-                    correctText: correctText
-                };
-            });
-            
+            const allRaw = [...block1Raw, ...block2Raw];
+            questions = allRaw.map(raw => buildShuffledQuestion(raw));
             localStorage.setItem(STORAGE_QUESTIONS_KEY, JSON.stringify(questions));
             resetProgress();
             document.getElementById('total-questions').textContent = questions.length;
             renderCurrentQuestion();
         }
         
+        function saveProgress() {
+            localStorage.setItem(STORAGE_PROGRESS_KEY, JSON.stringify({
+                currentIndex, userAnswers, answerStatus
+            }));
+            updateStatsUI();
+        }
+        
+        function loadProgress() {
+            const saved = localStorage.getItem(STORAGE_PROGRESS_KEY);
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    const currentIds = questions.map(q => q.id);
+                    if (data.userAnswers && data.answerStatus) {
+                        const valid = Object.keys(data.userAnswers).every(id => currentIds.includes(id));
+                        if (valid) {
+                            userAnswers = data.userAnswers;
+                            answerStatus = data.answerStatus;
+                        }
+                    }
+                    if (typeof data.currentIndex === 'number' && data.currentIndex >= 0 && data.currentIndex < questions.length) {
+                        currentIndex = data.currentIndex;
+                    } else {
+                        currentIndex = questions.findIndex((_, idx) => !userAnswers[questions[idx]?.id]) ?? 0;
+                        if (currentIndex === -1) currentIndex = 0;
+                    }
+                } catch(e) { resetProgress(); }
+            } else {
+                resetProgress();
+            }
+            updateStatsUI();
+        }
+        
         function computeStats() {
             const totalAnswered = Object.keys(userAnswers).length;
             let correct = 0;
-            for (let id in answerStatus) {
-                if (answerStatus[id] === true) correct++;
-            }
-            const errors = totalAnswered - correct;
+            for (let id in answerStatus) if (answerStatus[id] === true) correct++;
             const percent = totalAnswered === 0 ? 0 : Math.round((correct / totalAnswered) * 100);
-            return { totalAnswered, correct, errors, percent };
+            return { totalAnswered, correct, errors: totalAnswered - correct, percent };
         }
         
         function updateStatsUI() {
-            const stats = computeStats();
-            document.getElementById('answered-count').textContent = stats.totalAnswered;
-            document.getElementById('correct-count').textContent = stats.correct;
-            document.getElementById('error-count').textContent = stats.errors;
-            document.getElementById('percent-correct').textContent = stats.percent + '%';
+            const s = computeStats();
+            document.getElementById('answered-count').textContent = s.totalAnswered;
+            document.getElementById('correct-count').textContent = s.correct;
+            document.getElementById('error-count').textContent = s.errors;
+            document.getElementById('percent-correct').textContent = s.percent + '%';
             document.getElementById('total-questions').textContent = questions.length;
         }
         
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/[&<>]/g, m => m === '&' ? '&amp;' : m === '<' ? '&lt;' : '&gt;');
+        }
+        
         function renderCurrentQuestion() {
+            const quizArea = document.getElementById('quizArea');
+            const completionScreen = document.getElementById('completionScreen');
+            
             if (currentIndex >= questions.length) {
                 quizArea.innerHTML = '';
-                const stats = computeStats();
+                const s = computeStats();
                 document.getElementById('finalStats').innerHTML = `
-                    <p>✅ Отвечено: ${stats.totalAnswered} из ${questions.length}</p>
-                    <p>✔️ Верных ответов: ${stats.correct}</p>
-                    <p>❌ Ошибок: ${stats.errors}</p>
-                    <p>📊 Процент верных: ${stats.percent}%</p>
+                    <p>✅ Отвечено: ${s.totalAnswered} из ${questions.length}</p>
+                    <p>✔️ Верных ответов: ${s.correct}</p>
+                    <p>❌ Ошибок: ${s.errors}</p>
+                    <p>📊 Процент верных: ${s.percent}%</p>
                 `;
                 completionScreen.classList.remove('hidden');
                 return;
@@ -823,139 +787,88 @@
             const selectedLetter = userAnswers[q.id] || null;
             const isAnswered = answerStatus.hasOwnProperty(q.id);
             const isCorrect = answerStatus[q.id];
+            const blockName = currentIndex < block1Raw.length ? 'МДК.02.01 «Технология изготовления лекарственных форм»' : 'МДК.02.02 «Контроль качества лекарственных средств»';
             
-            const blockName = currentIndex < 150 ? 'МДК.02.01 «Технология изготовления лекарственных форм»' : 'МДК.02.02 «Контроль качества лекарственных средств»';
-            
-            let html = `
-                <div class="block-badge">📌 ${blockName}</div>
+            let html = `<div class="block-badge">📌 ${blockName}</div>
                 <div class="question-card">
-                    <div class="question-header">
-                        <span>Вопрос ${currentIndex+1} из ${questions.length}</span>
-                        ${isAnswered ? '<span>✅ Отвечено</span>' : '<span>⏳ Ожидает ответа</span>'}
-                    </div>
+                    <div class="question-header"><span>Вопрос ${currentIndex+1} из ${questions.length}</span>${isAnswered ? '<span>✅ Отвечено</span>' : '<span>⏳ Ожидает ответа</span>'}</div>
                     <div class="question-text">${escapeHtml(q.questionText)}</div>
-                    <div class="options">
-            `;
+                    <div class="options">`;
             
             q.options.forEach(opt => {
-                let optionClass = 'option';
-                if (selectedLetter === opt.letter) optionClass += ' selected';
+                let cls = 'option';
+                if (selectedLetter === opt.letter) cls += ' selected';
                 if (isAnswered) {
-                    optionClass += ' disabled-true';
-                    if (opt.letter === q.correctLetter) {
-                        optionClass += ' correct-highlight';
-                    } else if (selectedLetter === opt.letter && opt.letter !== q.correctLetter) {
-                        optionClass += ' wrong-highlight';
-                    }
+                    cls += ' disabled-true';
+                    if (opt.letter === q.correctLetter) cls += ' correct-highlight';
+                    else if (selectedLetter === opt.letter && opt.letter !== q.correctLetter) cls += ' wrong-highlight';
                 }
-                html += `
-                    <div class="${optionClass}" data-letter="${opt.letter}">
-                        <span class="option-letter">${opt.letter}</span>
-                        <span>${escapeHtml(opt.text)}</span>
-                    </div>
-                `;
+                html += `<div class="${cls}" data-letter="${opt.letter}"><span class="option-letter">${opt.letter}</span><span>${escapeHtml(opt.text)}</span></div>`;
             });
             
             html += `</div><div class="actions">`;
-            if (!isAnswered) {
-                html += `<button class="btn btn-primary" id="submitAnswerBtn" ${!selectedLetter ? 'disabled' : ''}>Ответить</button>`;
-            }
-            html += `<button class="btn btn-outline" id="nextQuestionBtn">${isAnswered ? 'Далее ▶' : 'Пропустить'}</button>`;
-            html += `</div>`;
+            if (!isAnswered) html += `<button class="btn btn-primary" id="submitAnswerBtn" ${!selectedLetter ? 'disabled' : ''}>Ответить</button>`;
+            html += `<button class="btn btn-outline" id="nextQuestionBtn">${isAnswered ? 'Далее ▶' : 'Пропустить'}</button></div>`;
             
             if (isAnswered) {
-                const correctOptionText = q.options.find(o => o.letter === q.correctLetter).text;
-                if (isCorrect) {
-                    html += `<div class="feedback" style="border-left-color: #2e8b57;">✔ Правильно! Вы выбрали верный ответ.</div>`;
-                } else {
-                    html += `<div class="feedback" style="border-left-color: #c23b3b;">❌ Неверно. Правильный ответ: ${q.correctLetter}) ${escapeHtml(correctOptionText)}</div>`;
-                }
+                const correctText = q.options.find(o => o.letter === q.correctLetter).text;
+                html += `<div class="feedback" style="border-left-color: ${isCorrect ? '#2e8b57' : '#c23b3b'};">${isCorrect ? '✔ Правильно!' : `❌ Неверно. Правильный ответ: ${q.correctLetter}) ${escapeHtml(correctText)}`}</div>`;
             }
             
-            html += `</div><div class="nav-buttons">`;
-            html += `<button class="btn btn-outline" id="prevQuestionBtn" ${currentIndex === 0 ? 'disabled' : ''}>◀ Назад</button>`;
-            html += `<button class="btn btn-outline" id="nextQuestionBtn2">${isAnswered ? 'Далее ▶' : 'Пропустить'}</button>`;
-            html += `</div>`;
-            
+            html += `</div><div class="nav-buttons"><button class="btn btn-outline" id="prevQuestionBtn" ${currentIndex === 0 ? 'disabled' : ''}>◀ Назад</button>
+                      <button class="btn btn-outline" id="nextQuestionBtn2">${isAnswered ? 'Далее ▶' : 'Пропустить'}</button></div>`;
             quizArea.innerHTML = html;
             
-            const optionDivs = document.querySelectorAll('.option');
+            const opts = document.querySelectorAll('.option');
             if (!isAnswered) {
-                optionDivs.forEach(div => {
-                    div.addEventListener('click', (e) => {
+                opts.forEach(div => {
+                    div.addEventListener('click', () => {
                         const letter = div.dataset.letter;
-                        optionDivs.forEach(d => d.classList.remove('selected'));
+                        opts.forEach(d => d.classList.remove('selected'));
                         div.classList.add('selected');
-                        const submitBtn = document.getElementById('submitAnswerBtn');
-                        if (submitBtn) submitBtn.disabled = false;
+                        const btn = document.getElementById('submitAnswerBtn');
+                        if (btn) btn.disabled = false;
                         q._tempSelected = letter;
                     });
                 });
+                if (selectedLetter) {
+                    const selectedDiv = Array.from(opts).find(d => d.dataset.letter === selectedLetter);
+                    if (selectedDiv) selectedDiv.classList.add('selected');
+                    const btn = document.getElementById('submitAnswerBtn');
+                    if (btn) btn.disabled = false;
+                }
             }
             
             const submitBtn = document.getElementById('submitAnswerBtn');
             if (submitBtn) {
                 submitBtn.addEventListener('click', () => {
-                    const selected = q._tempSelected;
+                    const selected = q._tempSelected || selectedLetter;
                     if (!selected) return;
                     userAnswers[q.id] = selected;
-                    const isCorrectAns = (selected === q.correctLetter);
-                    answerStatus[q.id] = isCorrectAns;
+                    answerStatus[q.id] = (selected === q.correctLetter);
                     saveProgress();
                     renderCurrentQuestion();
                 });
             }
             
-            function goNext() {
-                if (currentIndex + 1 < questions.length) {
-                    currentIndex++;
-                    saveProgress();
-                    renderCurrentQuestion();
-                } else {
-                    currentIndex = questions.length;
-                    saveProgress();
-                    renderCurrentQuestion();
-                }
-            }
-            
+            const goNext = () => {
+                if (currentIndex + 1 < questions.length) currentIndex++;
+                else currentIndex = questions.length;
+                saveProgress();
+                renderCurrentQuestion();
+            };
             document.getElementById('nextQuestionBtn')?.addEventListener('click', goNext);
             document.getElementById('nextQuestionBtn2')?.addEventListener('click', goNext);
-            
-            const prevBtn = document.getElementById('prevQuestionBtn');
-            if (prevBtn) {
-                prevBtn.addEventListener('click', () => {
-                    if (currentIndex - 1 >= 0) {
-                        currentIndex--;
-                        saveProgress();
-                        renderCurrentQuestion();
-                    }
-                });
-            }
-        }
-        
-        function escapeHtml(str) {
-            if (!str) return '';
-            return str.replace(/[&<>]/g, function(m) {
-                if (m === '&') return '&amp;';
-                if (m === '<') return '&lt;';
-                if (m === '>') return '&gt;';
-                return m;
+            document.getElementById('prevQuestionBtn')?.addEventListener('click', () => {
+                if (currentIndex - 1 >= 0) { currentIndex--; saveProgress(); renderCurrentQuestion(); }
             });
         }
         
         initQuestions();
         loadProgress();
         renderCurrentQuestion();
-        
-        document.getElementById('resetTestBtn').addEventListener('click', () => {
-            if (confirm('Начать тест заново? Весь прогресс будет сброшен, вопросы перемешаются.')) {
-                fullReset();
-            }
-        });
-        
-        document.getElementById('resetFromCompleteBtn').addEventListener('click', () => {
-            fullReset();
-        });
+        document.getElementById('resetTestBtn').addEventListener('click', () => { if (confirm('Сбросить тест?')) fullReset(); });
+        document.getElementById('resetFromCompleteBtn').addEventListener('click', () => fullReset());
     })();
 </script>
 </body>
