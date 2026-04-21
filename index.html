@@ -617,8 +617,7 @@
             { q: "ЗАПАХ УКСУСНОЙ КИСЛОТЫ ПОЯВЛЯЕТСЯ ПРИ НЕПРАВИЛЬНОМ ХРАНЕНИИ КИСЛОТЫ", a: "А) ацетилсалициловой", b: "Б) никотиновой", c: "В) салициловой", d: "Г) аскорбиновой", correct: "А" }
         ];
 
-        // Функция перемешивания массива
-        function shuffleArray(arr) {
+ function shuffleArray(arr) {
             for (let i = arr.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -626,7 +625,6 @@
             return arr;
         }
 
-        // Генерация уникального ID вопроса (стабильный)
         function generateQuestionId(questionText, correctLetter) {
             let hash = 0;
             const str = questionText + correctLetter;
@@ -638,24 +636,20 @@
             return 'q_' + Math.abs(hash).toString(36);
         }
 
-        // КЛЮЧИ ДЛЯ localStorage
-        const STORAGE_QUESTIONS_KEY = 'pharma_test_questions_stable_v1';
-        const STORAGE_PROGRESS_KEY = 'pharma_test_progress_v4';
+        const STORAGE_QUESTIONS_KEY = 'pharma_test_questions_stable_v2';
+        const STORAGE_PROGRESS_KEY = 'pharma_test_progress_v5';
         
         let questions = [];
-        let currentQuestionId = null;
+        let currentIndex = 0;  // Используем индекс вместо ID
         let userAnswers = {};
         let answerStatus = {};
         
-        // Инициализация или загрузка вопросов
         function initQuestions() {
             const savedQuestions = localStorage.getItem(STORAGE_QUESTIONS_KEY);
             
             if (savedQuestions) {
-                // Восстанавливаем сохранённый порядок вопросов
                 questions = JSON.parse(savedQuestions);
             } else {
-                // Создаём вопросы в первый раз
                 const shuffledBlock1 = shuffleArray([...block1Raw]);
                 const shuffledBlock2 = shuffleArray([...block2Raw]);
                 const allRaw = [...shuffledBlock1, ...shuffledBlock2];
@@ -678,7 +672,6 @@
                     };
                 });
                 
-                // Сохраняем порядок вопросов
                 localStorage.setItem(STORAGE_QUESTIONS_KEY, JSON.stringify(questions));
             }
         }
@@ -690,7 +683,6 @@
                     const data = JSON.parse(saved);
                     const currentIds = questions.map(q => q.id);
                     
-                    // Проверяем, что сохранённые ответы относятся к текущим вопросам
                     if (data.userAnswers && data.answerStatus) {
                         const savedAnswerIds = Object.keys(data.userAnswers);
                         const allIdsValid = savedAnswerIds.every(id => currentIds.includes(id));
@@ -698,19 +690,16 @@
                         if (allIdsValid) {
                             userAnswers = data.userAnswers;
                             answerStatus = data.answerStatus;
-                        } else {
-                            // Если структура вопросов изменилась - сбрасываем
-                            resetProgress();
                         }
                     }
                     
-                    // Восстанавливаем текущий вопрос
-                    if (data.currentQuestionId && currentIds.includes(data.currentQuestionId)) {
-                        currentQuestionId = data.currentQuestionId;
+                    // Восстанавливаем индекс, проверяем валидность
+                    if (typeof data.currentIndex === 'number' && data.currentIndex >= 0 && data.currentIndex < questions.length) {
+                        currentIndex = data.currentIndex;
                     } else {
-                        // Ищем первый неотвеченный вопрос или первый в списке
-                        const firstUnanswered = questions.find(q => !userAnswers.hasOwnProperty(q.id));
-                        currentQuestionId = firstUnanswered ? firstUnanswered.id : questions[0]?.id;
+                        // Ищем первый неотвеченный вопрос
+                        const firstUnanswered = questions.findIndex((q, idx) => !userAnswers.hasOwnProperty(q.id));
+                        currentIndex = firstUnanswered !== -1 ? firstUnanswered : 0;
                     }
                 } catch(e) {
                     resetProgress();
@@ -719,23 +708,19 @@
                 resetProgress();
             }
             
-            if (!currentQuestionId && questions.length) {
-                currentQuestionId = questions[0].id;
-            }
-            
             updateStatsUI();
         }
         
         function resetProgress() {
             userAnswers = {};
             answerStatus = {};
-            currentQuestionId = questions[0]?.id;
+            currentIndex = 0;
             saveProgress();
         }
         
         function saveProgress() {
             const data = {
-                currentQuestionId: currentQuestionId,
+                currentIndex: currentIndex,
                 userAnswers: userAnswers,
                 answerStatus: answerStatus
             };
@@ -743,9 +728,7 @@
             updateStatsUI();
         }
         
-        // Полный сброс с перемешиванием вопросов
         function fullReset() {
-            // Перемешиваем вопросы заново
             const shuffledBlock1 = shuffleArray([...block1Raw]);
             const shuffledBlock2 = shuffleArray([...block2Raw]);
             const allRaw = [...shuffledBlock1, ...shuffledBlock2];
@@ -768,15 +751,9 @@
                 };
             });
             
-            // Сохраняем новый порядок вопросов
             localStorage.setItem(STORAGE_QUESTIONS_KEY, JSON.stringify(questions));
-            
-            // Сбрасываем прогресс
             resetProgress();
-            
-            // Обновляем общее количество
             document.getElementById('total-questions').textContent = questions.length;
-            
             renderCurrentQuestion();
         }
         
@@ -800,15 +777,9 @@
             document.getElementById('total-questions').textContent = questions.length;
         }
         
-        function getIndexById(id) {
-            return questions.findIndex(q => q.id === id);
-        }
-        
         function renderCurrentQuestion() {
-            const currentIndex = getIndexById(currentQuestionId);
-            
-            // Проверка на завершение теста
-            if (currentIndex === -1 || currentIndex >= questions.length) {
+            // Проверка на завершение
+            if (currentIndex >= questions.length) {
                 quizArea.innerHTML = '';
                 const stats = computeStats();
                 document.getElementById('finalStats').innerHTML = `
@@ -871,7 +842,6 @@
                 if (isCorrect) {
                     html += `<div class="feedback" style="border-left-color: #2e8b57;">✔ Правильно! Вы выбрали верный ответ.</div>`;
                 } else {
-                    const selectedText = q.options.find(o => o.letter === selectedLetter)?.text || '';
                     html += `<div class="feedback" style="border-left-color: #c23b3b;">❌ Неверно. Правильный ответ: ${q.correctLetter}) ${escapeHtml(correctOptionText)}</div>`;
                 }
             }
@@ -911,14 +881,13 @@
             }
             
             function goNext() {
-                const nextIndex = getIndexById(currentQuestionId) + 1;
-                if (nextIndex < questions.length) {
-                    currentQuestionId = questions[nextIndex].id;
+                if (currentIndex + 1 < questions.length) {
+                    currentIndex++;
                     saveProgress();
                     renderCurrentQuestion();
                 } else {
                     // Тест завершён
-                    currentQuestionId = null;
+                    currentIndex = questions.length;
                     saveProgress();
                     renderCurrentQuestion();
                 }
@@ -930,9 +899,8 @@
             const prevBtn = document.getElementById('prevQuestionBtn');
             if (prevBtn) {
                 prevBtn.addEventListener('click', () => {
-                    const prevIndex = getIndexById(currentQuestionId) - 1;
-                    if (prevIndex >= 0) {
-                        currentQuestionId = questions[prevIndex].id;
+                    if (currentIndex - 1 >= 0) {
+                        currentIndex--;
                         saveProgress();
                         renderCurrentQuestion();
                     }
@@ -940,7 +908,6 @@
             }
         }
         
-        // Простая защита от XSS
         function escapeHtml(str) {
             if (!str) return '';
             return str.replace(/[&<>]/g, function(m) {
@@ -948,17 +915,14 @@
                 if (m === '<') return '&lt;';
                 if (m === '>') return '&gt;';
                 return m;
-            }).replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, function(c) {
-                return c;
             });
         }
         
-        // Инициализация и запуск
+        // Инициализация
         initQuestions();
         loadProgress();
         renderCurrentQuestion();
         
-        // Кнопки сброса
         document.getElementById('resetTestBtn').addEventListener('click', () => {
             if (confirm('Начать тест заново? Весь прогресс будет сброшен, вопросы перемешаются.')) {
                 fullReset();
